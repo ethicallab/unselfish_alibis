@@ -1,0 +1,220 @@
+# Julian De Freitas, 2021-2023
+
+## clear workspace
+rm(list = ls()) 
+
+options(download.file.method="libcurl")
+
+if (!require(pacman)) {install.packages("pacman")}
+pacman::p_load('ggplot2', #plotting
+               'ggsignif', #plotting significance bars
+               'lme4', #functions for fitting linear regression modesl
+               'ggforce', #make ggplot even fancier
+               'ggpubr', #arrange plots in a grid, if neededd
+               'ltm', #probably not using..
+               'simr', # power analysis for mixed models
+               'compute.es', # effect size package
+               'effsize', # another effect size package
+               'pwr', #package for power calculation
+               'filesstrings', #create and move files
+)
+library("lmerTest")
+
+##================================================================================================================
+                                              ##IMPORT & PRE-PROCESS d##
+##================================================================================================================
+
+#get subjects from e1
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path)) #set working directoy to current directory
+
+#read data
+d_raw <- read.csv('e5_data.csv')
+d_raw <- subset(d_raw, d_raw$att1==2 & d_raw$att2==2)
+
+#define new d frame that we'll extract preprocessed d into
+d_subset <- array(dim=c(dim(d_raw)[1], 4))
+colnames(d_subset) <- c('tempt_cond', 'choice','comp1','comp2')
+
+d_subset <- as.data.frame(d_subset, stringsAsFactors=FALSE)
+
+#extract the good d from the middle part of the raw d
+for(i in 1:dim(d_raw)[1]) {
+    curr <- d_raw[i,21:24][!is.na(d_raw[i,21:24])] #for a given row, get only the non NA values
+    d_subset[i,2:4] <- as.numeric(curr[curr!= ""]) #and only the non-empty values
+    cond_names <- d_raw[i,32][!is.na(d_raw[i,32])]
+    cond_names <- cond_names[cond_names!= ""] 
+    d_subset[i,1] <- strsplit(cond_names[[1]], "_")[[1]][2]
+}
+
+#merge good d with first and last halves of the original d
+d_raw <- cbind(d_raw[,18:20], d_subset, d_raw[,25:32])
+
+#check that we have equal numbers for each of our various conditions
+table(d_raw$tempt_cond)
+
+# number of subjects before exclusions
+n_original <- dim(d_raw)[1]
+n_original
+
+#recode some conditions
+d_raw$tempt_cond <- as.factor(d_raw$tempt_cond)
+d_raw$tempt_num <- as.numeric(d_raw$tempt_cond)
+d_raw$choice <- d_raw$choice - 1 
+
+##================================================================================================================
+                                                ##EXCLUSIONS##
+##================================================================================================================
+
+#comprehension exclusions
+d_raw$comp2_recode <- ifelse(d_raw$comp2==1, "untempted", ifelse(d_raw$comp2==2, "tempted", "neither"))
+
+#perform exclusions based on attention and comprehension checks
+d <- subset(d_raw, (d_raw$comp1 == '2') &
+                   (d_raw$comp2_recode == d_raw$tempt_cond))
+
+#number of subjects after exclusions
+n_after_exclusions <- dim(d)[1]
+n_after_exclusions
+n_original-n_after_exclusions
+
+percent_excluded <- (n_original - n_after_exclusions)/n_original #34%
+percent_excluded
+
+## mean age and gender
+mean(as.numeric(d$age),na.rm = TRUE) 
+table(d$gender)[1]/sum(table(d$gender)) 
+
+table(d$tempt_cond)
+
+##================================================================================================================
+                                                  ##ANALYSIS##
+##================================================================================================================
+
+# logistic regression
+mylogit <- glm(choice ~ tempt_cond, d = d, family = "binomial")
+summary(mylogit)
+
+# proportions
+forced_tab <- table(d$choice, d$tempt_cond); forced_tab #0 = selfish
+
+selfish_tempted <- forced_tab[1,1]/sum(forced_tab[,1]); selfish_tempted
+selfish_untempted <- forced_tab[1,2]/sum(forced_tab[,2]); selfish_untempted
+
+# followup chi-squared
+forced_mod <- chisq.test(forced_tab); forced_mod
+
+## repeat analysis without exclusions
+
+# logistic regresion
+mylogit <- glm(choice ~ tempt_cond, d = d_raw, family = "binomial")
+summary(mylogit)
+
+# proportions
+forced_tab <- table(d_raw$choice, d_raw$tempt_cond); forced_tab #0 = selfish
+
+selfish_tempted <- forced_tab[1,1]/sum(forced_tab[,1]); selfish_tempted
+selfish_untempted <- forced_tab[1,2]/sum(forced_tab[,2]); selfish_untempted
+
+# followup chi-squared
+forced_mod <- chisq.test(forced_tab); forced_mod
+
+##=============================================================================================================
+                                          ##PREPARE FOR PLOTTING##
+##================================================================================================================
+
+d$choice <- as.numeric(d$choice)
+
+#make arrays for plotting infinity item
+choice_mat <- array(0,dim=c(4,3))
+colnames(choice_mat) <- c('tempt_num', 'choice', 'proportion')
+choice_mat <- as.data.frame(choice_mat, stringsAsFactors=FALSE)
+
+counter <- 1
+for(i in 1:2) {
+  for(j in 0:1) {
+      choice_mat[counter,] <- c(i,j, length(d$choice[d$tempt_num==i & d$choice==j])/
+                                     length(d$choice[d$tempt_num==i])*100)
+      counter <- counter + 1
+  }
+}
+
+choice_mat$tempt_num <- ifelse(choice_mat$tempt_num==1,2,1)
+
+tempt_labels <- c('Untempted', 'Tempted')
+choice_labels <- c("Proximity", "Random")
+
+##=============================================================================================================
+##PLOT##
+##================================================================================================================
+
+BarPlotter <- function(d, x_var, x_lab, y_var, y_lab, group_var, x_tick_labs, leg_labels, title) { 
+  
+  plot<-ggplot(d,aes(x=factor(x_var),y=y_var,fill=factor(group_var)),color=factor(group_var)) +  
+    stat_summary(fun=mean,position=position_dodge(),geom="bar")+
+    theme_classic()+
+    coord_cartesian(ylim=c(1,100))
+  plot<- plot+theme(text = element_text(size=16))+
+    ggtitle(title)+
+    theme(title = element_text(hjust = 0.5))+
+    scale_fill_manual(name="", labels = leg_labels, 
+                      values = c("#333333", "#cccccc", "#989898")) + 
+    labs(x = x_lab, y = y_lab, fill = "", title="") + 
+    theme_classic()+
+    theme(text = element_text(size = 25),
+          axis.title.y = element_text(size = 25), 
+          axis.title.x = element_text(size = 25, margin = margin(t = 20, r = 0, b = 0, l = 0)), 
+          axis.text.x = element_text(size = 20),
+          legend.position="top") + 
+    stat_summary(fun.data = "mean_cl_boot", color = "black", 
+                 position = position_dodge(width = 0.9),
+                 geom="errorbar", width = 0.2)+
+    scale_x_discrete(labels=x_tick_labs)+
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  plot
+  
+  return(plot)
+}
+
+choice_labels <- c('Proximity', 'Random')
+forced_labels <- c('Absent', 'Present')
+
+p1 <- BarPlotter(choice_mat, choice_mat$tempt_num, 'Selfish Temptation', choice_mat$proportion, 'Proportion', choice_mat$choice, forced_labels, choice_labels, '')
+
+dev.new(width=7,height=8,noRStudioGD = TRUE)
+p1
+
+
+ggsave(
+  "e5_unselfish_alibis.pdf",
+  last_plot(),
+  dpi = 500
+)
+
+dir.create(file.path('plots'))
+plot_files <- list.files(pattern = c("(.pdf|.png)"))
+file.move(plot_files, "./plots", overwrite = TRUE)
+
+##================================================================================================================
+##END##
+##================================================================================================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
