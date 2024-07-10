@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import re
+import polars as pl 
+
 alphabets= "([A-Za-z])"
 prefixes = "(Mr|St|Mrs|Ms|Dr)[.]"
 suffixes = "(Inc|Ltd|Jr|Sr|Co)"
@@ -55,3 +57,13 @@ def get_body(comment):
         return body
     except:
         return ""
+
+def multithread_map(dataframe, num_threads, map_function, target_column):
+    dataframe = dataframe.with_row_count().with_columns(
+            pl.col("row_nr").map_elements(lambda x: x % num_threads))
+
+    dfs = dataframe.partition_by()
+
+
+
+
