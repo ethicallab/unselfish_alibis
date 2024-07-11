@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 import re
 import polars as pl 
+from multiprocessing.pool import ThreadPool 
+import spacy
+
+nlp = spacy.load("en_core_web_sm")
 
 alphabets= "([A-Za-z])"
 prefixes = "(Mr|St|Mrs|Ms|Dr)[.]"
@@ -52,18 +56,64 @@ def split_into_sentences(text: str) -> list[str]:
     return sentences
 
 def get_body(comment):
+    """
+    Get body of the reddit comments, and exclude the ones that throw exceptions
+    """
     try:
         body = comment.body
         return body
     except:
         return ""
 
-def multithread_map(dataframe, num_threads, map_function, target_column):
+def multithread_map(dataframe: pl.DataFrame, num_threads: int, map_function, target_column: str) -> pl.DataFrame:
+    """
+    Takes in polar Dataframe and applies a function on a target column
+    based on the number of threads
+
+    Due to race conditions and implementation, the returned dataframe
+    will NOT be in the same order
+    """
+
+    ## Set up partition of dataset
     dataframe = dataframe.with_row_count().with_columns(
             pl.col("row_nr").map_elements(lambda x: x % num_threads))
 
-    dfs = dataframe.partition_by()
+    ## Partition based on the number of threads
+    dfs = dataframe.partition_by("row_nr")
 
+    ## Internal function to apply the following function
+    def map_partition(which_partition):
+        return dfs[which_partition].with_columns(
+            pl.col(target_column) \
+              .map_elements(map_function) \
+              .alias("sentiment")
+            )
+
+    ## Run thread pool
+    results = []
+    pool = ThreadPool(num_threads)
+    for i in range(0, num_threads):
+        results.append(pool.apply_async(map_partition, (i,)))
+
+    ## Close and collect threads
+    pool.close()
+    pool.join()
+
+    ## Obtain results and concatenate all the mappde values
+    results = [result.get() for result in results]
+    df = pl.concat(results).drop("row_nr")
+    
+    return df
+
+def remove_stop_words(sentence): 
+  # Parse the sentence using spaCy 
+  doc = nlp(sentence) 
+  
+  # Use a list comprehension to remove stop words 
+  filtered_tokens = [token for token in doc if not token.is_stop] 
+  
+  # Join the filtered tokens back into a sentence 
+  return ' '.join([token.text for token in filtered_tokens])
 
 
 
