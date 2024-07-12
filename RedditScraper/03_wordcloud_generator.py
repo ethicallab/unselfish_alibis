@@ -10,26 +10,12 @@ nlp = spacy.load("en_core_web_sm")
 if __name__ == "__main__":
     ## Read in the sentences of Posts
     posts = pl.read_csv("./Data/Posts_Sentences.csv")
-    """
-    posts = posts.with_columns(
-        pl.col("sentences").map_elements(remove_stop_words).alias("cleaned_sentence")
-    )
-
-    posts.write_csv("./Data/Posts_Sentences.csv")
-    """
 
     posts = posts.filter(pl.col('sentences').str.contains("assertive"))
     posts_text = " ".join(posts["sentences"].to_list())
 
     ## Read in sentences in Comments
     comments = pl.read_csv("./Data/Comments_Sentences.csv")
-    """
-    comments = comments.with_columns(
-        pl.col("sentence").map_elements(remove_stop_words).alias("cleaned_sentence")
-    )
-
-    comments.write_csv("./Data/Comments_Sentences.csv")
-    """
 
     comments = comments.filter(pl.col('sentence').str.contains("assertive"))
     comments_text = " ".join(comments["sentence"].to_list())

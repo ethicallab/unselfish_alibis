@@ -2,8 +2,9 @@ import praw
 import polars as pl
 from datetime import datetime
 import os
-from util import split_into_sentences, get_body
+from util import split_into_sentences, get_body, remove_stop_words
 from dotenv import load_dotenv
+
 
 load_dotenv() 
 
@@ -65,12 +66,17 @@ if __name__ == "__main__":
     posts = posts.with_columns(pl.col("all_text").map_elements(split_into_sentences)).explode("all_text")
     posts = posts.select(["id", "all_text"]).rename({"all_text":"sentences"})
 
+    posts = posts.with_columns(
+        pl.col("sentences").map_elements(remove_stop_words).alias("cleaned_sentence")
+    )
+
     posts.write_csv("./Data/Posts_Sentences.csv")
 
     #=======#=======#=======#=======#=======#=======#=======#=======#=======#=======#=======
     # Scrape comments from scraped posts
     #=======#=======#=======#=======#=======#=======#=======#=======#=======#=======#=======
     ## Get all relevant ids
+    
     post_ids = df["id"]
 
     post_links = []
@@ -93,16 +99,20 @@ if __name__ == "__main__":
     comment_ids = [x for xs in comment_ids for x in xs]
 
     ## Combine all comments
-    df = pl.DataFrame(
+    comments = pl.DataFrame(
         {"post_id": post_links,
         "comment_id": comment_ids, 
         "body": comment_body})
 
-    df.write_csv("./Data/Comments.csv")
+    comments.write_csv("./Data/Comments.csv")
 
     ## Break up comments into sentences
-    df = df.with_columns(pl.col("body").map_elements(split_into_sentences)) \
+    comments = comments.with_columns(pl.col("body").map_elements(split_into_sentences)) \
         .explode("body") \
         .rename({"body":"sentence"})
+    
+    comments = comments.with_columns(
+        pl.col("sentence").map_elements(remove_stop_words).alias("cleaned_sentence")
+    )
 
-    df.write_csv("./Data/Comments_Sentences.csv")
+    comments.write_csv("./Data/Comments_Sentences.csv")
