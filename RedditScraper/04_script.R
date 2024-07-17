@@ -177,15 +177,6 @@ word_topic_pos |>
 ## Combine Both
 word_topic <- rbind(word_topic_neg, word_topic_pos)
 
-ggplot(word_topic, aes(beta, y = reorder(term, beta), fill = factor(topic))) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(~ topic, scales = "free", ncol = 5) +
-  theme_classic() +
-  xlab("") +
-  ylab("")
-
-ggsave("./Graphics/lda.jpg", device = "jpg",width = 10, height = 5, units = "in")
-
 ## POSITIVE and AGGRESSIVE
 positive_sentiments |>
   filter(grepl("aggressive", sentences)) -> pa
@@ -196,4 +187,66 @@ negative_sentiments |>
 
 aggressive <- rbind(pa,na)
 
-write_csv(aggressive, "./Data/aggressive.csv")
+write_csv(aggressive, "./Data/Aggressive.csv")
+
+
+##========================================================================
+#                         TOPICS BY DOCUMENT
+##========================================================================
+
+## Negative Documents
+documents_negative <- tidy(lda_negative, matrix = "gamma")
+
+documents_negative |>
+  group_by(document) |>
+  mutate( 
+    document = as.numeric(document),
+    max_gamma = max(gamma),
+    topic_highest_prob = ifelse(gamma == max_gamma, 1, 0)
+    ) |>
+  filter(topic_highest_prob == 1) |>
+  select(document, topic, gamma ) -> d_neg
+
+negative_sentiments |>
+  mutate( document = row_number() ) |>
+  left_join(d_neg, by = "document" ) -> negative_topics
+
+## Positive Documents
+documents_positive <- tidy(lda_positive, matrix = "gamma")
+
+documents_positive |>
+  group_by(document) |>
+  mutate( 
+    document = as.numeric(document),
+    max_gamma = max(gamma),
+    topic_highest_prob = ifelse(gamma == max_gamma, 1, 0)
+  ) |>
+  filter(topic_highest_prob == 1) |>
+  select(document, topic, gamma ) -> d_pos
+
+positive_sentiments |>
+  mutate( document = row_number() ) |>
+  left_join(d_pos, by = "document" ) -> positive_topics
+
+word_topic |>
+  mutate(
+    topic = case_when(
+      topic == "negative:1" ~ "Negative: Complaints on Lane Changing",
+      topic == "negative:2" ~ "Negative: Complaints on Follow Distance",
+      topic == "negative:3" ~ "Negative: Complaints on Being Too Assertive",
+      topic == "negative:4" ~ "Negative: No Difference in Assertive Mode",
+      topic == "negative:5" ~ "Negative: Complaints on Driving Speed",
+      topic == "positive:1" ~ "Positive: Express Preference for Assertive Mode",
+      topic == "positive:2" ~ "Positive: Discuss Use Cases of Assertive Mode",
+    )
+  ) -> word_topic
+
+ggplot(word_topic, aes(x = beta, y = reorder_within(term, beta, topic), fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free", ncol = 2) +
+  theme_classic() +
+  xlab("") +
+  ylab("") +
+  scale_y_discrete(label = function(x) str_replace(x, "_(.+)", ""))
+
+ggsave("./Graphics/lda.jpg", device = "jpg",width = 8, height = 14, units = "in")
